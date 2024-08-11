@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 )
 
@@ -18,9 +19,26 @@ func (n *QueueNode) GetJobInfo() string {
 	return n.jobInfo
 }
 
+// PQueue size config opts
+const (
+	LARGE_FIRST = "large"
+	SMALL_FIRST = "small"
+)
+
 type PQueue struct {
-	head *QueueNode
-	size int
+	head      *QueueNode
+	size      int
+	sortOrder string
+}
+
+func newPQueue(sizeConfig string) (*PQueue, error) {
+	if sizeConfig != LARGE_FIRST && sizeConfig != SMALL_FIRST {
+		return nil, errors.New("invalid size config, give either LARGE_FIRST or SMALL_FIRST")
+	}
+
+	return &PQueue{
+		sortOrder: sizeConfig,
+	}, nil
 }
 
 func (pq *PQueue) Size() int {
@@ -49,7 +67,7 @@ func (pq *PQueue) Insert(jobLen int, jobInfo string) {
 			jobLen:  jobLen,
 			jobInfo: jobInfo,
 		}
-		if head.GetJobLen() <= jobLen {
+		if head.GetJobLen() <= jobLen && pq.sortOrder == LARGE_FIRST {
 			insert.Next = head
 			pq.head = insert
 		} else {
@@ -70,13 +88,19 @@ func (pq *PQueue) Insert(jobLen int, jobInfo string) {
 }
 
 func (pq *PQueue) sortInsert(inserted *QueueNode, prevNode *QueueNode, currNode *QueueNode, currIsHead bool) {
-	if currIsHead && inserted.jobLen >= currNode.jobLen {
+	if currIsHead && inserted.jobLen >= currNode.jobLen && pq.sortOrder == LARGE_FIRST {
 		pq.head = inserted
 		inserted.Next = currNode
 		return
 	}
 
-	if inserted.jobLen >= currNode.jobLen {
+	if currIsHead && inserted.jobLen <= currNode.jobLen && pq.sortOrder == SMALL_FIRST {
+		pq.head = inserted
+		inserted.Next = currNode
+		return
+	}
+
+	if inserted.jobLen >= currNode.jobLen && pq.sortOrder == LARGE_FIRST {
 		prevNode.Next = inserted
 		inserted.Next = currNode
 		return
@@ -88,7 +112,17 @@ func (pq *PQueue) sortInsert(inserted *QueueNode, prevNode *QueueNode, currNode 
 	}
 
 	next := currNode.Next
-	pq.sortInsert(inserted, currNode, next, false)
+	if currNode.jobLen >= inserted.jobLen && pq.sortOrder == SMALL_FIRST {
+		curr := inserted
+		insert := currNode
+		next := currNode.Next
+		prevNode.Next = inserted
+		inserted.Next = currNode.Next
+		pq.sortInsert(insert, curr, next, false)
+	} else {
+		pq.sortInsert(inserted, currNode, next, false)
+	}
+
 }
 
 func (pq *PQueue) Get() *QueueNode {
@@ -129,7 +163,11 @@ func main() {
 		jobInfo: "baz",
 	}
 
-	pq := PQueue{}
+	pq, err := newPQueue(LARGE_FIRST)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
 	for _, insert := range toInsert {
 		pq.Insert(insert.jobLen, insert.jobInfo)
 	}
@@ -156,6 +194,55 @@ func main() {
 		{jobLen: 7, jobInfo: "foo"},
 		{jobLen: 6, jobInfo: "foo"},
 		{jobLen: 5, jobInfo: "foo"},
+	}
+
+	for i := range all {
+		if all[i].jobLen != want[i].jobLen && all[i].jobInfo != want[i].jobInfo {
+			fmt.Printf("oopsie queue not in order, got %+v and wanted %+v\n", all[i], want[i])
+			break
+		}
+	}
+
+	toInsert = []QueueNode{
+		{jobLen: 10, jobInfo: "foo"},
+		{jobLen: 9, jobInfo: "foo"},
+		{jobLen: 7, jobInfo: "foo"},
+		{jobLen: 6, jobInfo: "foo"},
+		{jobLen: 5, jobInfo: "foo"},
+	}
+
+	pq2, err := newPQueue(SMALL_FIRST)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	for _, insert := range toInsert {
+		pq2.Insert(insert.jobLen, insert.jobInfo)
+	}
+
+	if pq2.Size() != len(toInsert) {
+		fmt.Printf("got %d, wanted: %d\n", pq2.Size(), len(toInsert))
+		return
+	}
+
+	pq2.Insert(testVal.jobLen, testVal.jobInfo)
+	if pq2.Size() != len(toInsert)+1 {
+		fmt.Printf("got %d, wanted: %d\n", pq2.Size(), len(toInsert)+1)
+	}
+
+	all = []QueueNode{}
+	for !pq2.IsEmpty() {
+		all = append(all, *pq2.Get())
+	}
+
+	want = []QueueNode{
+		{jobLen: 5, jobInfo: "foo"},
+		{jobLen: 6, jobInfo: "foo"},
+		{jobLen: 7, jobInfo: "foo"},
+		{jobLen: 8, jobInfo: "baz"},
+		{jobLen: 9, jobInfo: "foo"},
+		{jobLen: 10, jobInfo: "foo"},
 	}
 
 	for i := range all {
